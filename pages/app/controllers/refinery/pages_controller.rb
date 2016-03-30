@@ -3,7 +3,8 @@ module Refinery
     include Pages::RenderOptions
 
     before_action :find_page, :set_canonical
-    before_action :error_404, :unless => :current_user_can_view_page?
+    before_action :error_404, if: :action_has_page_finder?,
+                              unless: :current_user_can_view_page?
 
     # Save whole Page after delivery
     after_action :write_cache?
@@ -63,21 +64,28 @@ module Refinery
       page.live? || authorisation_manager.allow?(:plugin, "refinery_pages")
     end
 
+    def action_has_page_finder?
+      self.class.instance_methods(false).include? action_page_finder
+    end
+
     def first_live_child
       page.children.order('lft ASC').live.first
     end
 
     def find_page(fallback_to_404 = true)
-      @page ||= case action_name
-                when "home"
-                  Refinery::Page.find_by(link_url: '/')
-                when "show"
-                  Refinery::Page.friendly.find_by_path_or_id(params[:path], params[:id])
-                end
+      @page ||= send(action_page_finder) if action_has_page_finder?
       @page || (error_404 if fallback_to_404)
     end
 
     alias_method :page, :find_page
+
+    def find_page_for_home
+      Refinery::Page.find_by link_url: '/'
+    end
+
+    def find_page_for_show
+      Refinery::Page.friendly.find_by_path_or_id params[:path], params[:id]
+    end
 
     def set_canonical
       @canonical = refinery.url_for @page.canonical if @page.present?
@@ -88,6 +96,11 @@ module Refinery
       if Refinery::Pages.cache_pages_full && !authorisation_manager.allow?(:read, :site_bar)
         cache_page(response.body, File.join('', 'refinery', 'cache', 'pages', request.path).to_s)
       end
+    end
+
+    private
+    def action_page_finder
+      :"find_page_for_#{action_name}"
     end
   end
 end
